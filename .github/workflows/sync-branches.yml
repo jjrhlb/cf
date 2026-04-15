@@ -1,0 +1,66 @@
+name: Sync All Branches from Upstream
+
+permissions:
+  contents: write
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # every day at UTC 00:00
+  workflow_dispatch:
+
+jobs:
+  sync_branches:
+    name: Sync all branches from upstream repo
+    runs-on: ubuntu-latest
+    if: ${{ github.event.repository.fork }}
+
+    steps:
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # fetch all history for all branches
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/cmliu/edgetunnel.git
+          git fetch upstream
+
+      - name: Sync all upstream branches
+        run: |
+          # Get all remote branches from upstream (exclude HEAD)
+          UPSTREAM_BRANCHES=$(git branch -r | grep '^  upstream/' | grep -v 'HEAD' | sed 's/^  upstream\///')
+
+          echo "Upstream branches found:"
+          echo "$UPSTREAM_BRANCHES"
+
+          for BRANCH in $UPSTREAM_BRANCHES; do
+            echo ""
+            echo "=== Processing branch: $BRANCH ==="
+
+            # Check if branch exists locally
+            if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+              echo "Branch '$BRANCH' exists in fork, updating..."
+              git checkout "$BRANCH"
+              git merge "upstream/$BRANCH" --no-edit
+              git push origin "$BRANCH"
+            else
+              echo "Branch '$BRANCH' does NOT exist in fork, creating..."
+              git checkout -b "$BRANCH" "upstream/$BRANCH"
+              git push origin "$BRANCH"
+            fi
+          done
+
+          echo ""
+          echo "=== All branches synced successfully ==="
+
+      - name: Sync check
+        if: failure()
+        run: |
+          echo "[Error] 分支同步失败，请检查上游仓库是否有变更或手动同步一次"
+          echo "[Error] Branch sync failed. Please check upstream repo changes or manually sync once."
+          exit 1
